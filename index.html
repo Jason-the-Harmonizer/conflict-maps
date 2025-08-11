@@ -1,0 +1,263 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8" />
+  <title>Global Conflict Motives — Interactive Map</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <link rel="preconnect" href="https://unpkg.com">
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+  <style>
+    html, body, #map { height: 100%; margin: 0; }
+    .toolbar {
+      position: absolute; z-index: 9999; background: #fff; padding: 10px;
+      border-radius: 8px; box-shadow: 0 1px 4px rgba(0,0,0,.2); top: 10px; left: 10px;
+      font-family: -apple-system,BlinkMacSystemFont,Segoe UI,Roboto,Helvetica,Arial,sans-serif;
+    }
+    .legend {
+      position: absolute; right: 10px; bottom: 10px; background: #fff; padding: 10px;
+      border-radius: 8px; box-shadow: 0 1px 4px rgba(0,0,0,.2);
+      font-family: -apple-system,BlinkMacSystemFont,Segoe UI,Roboto,Helvetica,Arial,sans-serif;
+    }
+    .swatch { display:inline-block; width:12px; height:12px; margin-right:6px; border-radius:2px; vertical-align:-1px; }
+    .bar { width: 200px; height: 10px;
+      background: linear-gradient(90deg,#440154,#3b528b,#21918c,#5ec962,#fde725);
+      border-radius: 4px; margin-top: 6px;
+    }
+    button { margin-right: 6px; }
+    .note { font-size: 12px; opacity: .7; margin-top: 4px; }
+  </style>
+</head>
+<body>
+  <div class="toolbar">
+    <b>View:</b>
+    <button id="btnCat">Categorical</button>
+    <button id="btnGrad">Gradient</button>
+    <div class="note">If you add a CSV named <code>Exhaustive_Global_Conflict_Fighter_Justifications_with_ISO_and_ID.csv</code>, this page will auto-use it.</div>
+  </div>
+  <div id="map"></div>
+  <div class="legend" id="legend"></div>
+
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+  <script>
+    // --------- CONFIG ---------
+    const CSV_PATH = "Exhaustive_Global_Conflict_Fighter_Justifications_with_ISO_and_ID.csv"; // auto-load if present
+    const motiveCols = [
+      "Defense/Security","Justice/Redress","Identity/Nationalism/Religion",
+      "Governance/Autonomy","Material/Status","Coercion/Constraint",
+      "Community/Networks","External Narrative"
+    ];
+    const colorMap = {
+      "Defense/Security": "#1f77b4",
+      "Justice/Redress": "#d62728",
+      "Identity/Nationalism/Religion": "#9467bd",
+      "Governance/Autonomy": "#2ca02c",
+      "Material/Status": "#8c564b",
+      "Coercion/Constraint": "#e377c2",
+      "Community/Networks": "#17becf",
+      "External Narrative": "#ff7f0e"
+    };
+
+    // Country centroids (enough to place markers sensibly)
+    const centroids = {
+      "Ukraine":[48.3794,31.1656],"Russia":[61.5240,105.3188],
+      "Armenia":[40.0691,45.0382],"Azerbaijan":[40.1431,47.5769],
+      "Israel":[31.0461,34.8516],"Gaza":[31.4,34.3],"West Bank":[31.9466,35.3027],
+      "Lebanon":[33.8547,35.8623],"Syria":[34.8021,38.9968],"Iraq":[33.2232,43.6793],
+      "Yemen":[15.5527,48.5164],"Iran":[32.4279,53.6880],"Egypt":[26.8206,30.8025],
+      "Morocco":[31.7917,-7.0926],"Western Sahara":[24.2155,-12.8858],
+      "Sudan":[12.8628,30.2176],"South Sudan":[6.8769,31.3069],"Ethiopia":[9.1450,40.4897],
+      "Democratic Republic of the Congo":[-4.0383,21.7587],"Somalia":[5.1521,46.1996],
+      "Mali":[17.5707,-3.9962],"Burkina Faso":[12.2383,-1.5616],"Niger":[17.6078,8.0817],
+      "Cameroon":[7.3697,12.3547],"Mozambique":[-18.6657,35.5296],
+      "Central African Republic":[6.6111,20.9394],"Chad":[15.4542,18.7322],
+      "Benin":[9.3077,2.3158],"Togo":[8.6195,0.8248],"Kenya":[-0.0236,37.9062],
+      "Libya":[26.3351,17.2283],"Afghanistan":[33.9391,67.7100],
+      "Pakistan":[30.3753,69.3451],"India":[20.5937,78.9629],"Thailand":[15.8700,100.9925],
+      "Philippines":[12.8797,121.7740],"Indonesia":[-0.7893,113.9213],"Myanmar":[21.9162,95.9560],
+      "Mexico":[23.6345,-102.5528],"Colombia":[4.5709,-74.2973],"Haiti":[18.9712,-72.2852],
+      "Venezuela":[6.4238,-66.5897],"Georgia":[42.3154,43.3569],"Turkey":[38.9637,35.2433]
+    };
+
+    // Multi-country conflict aliases
+    const aliasMap = {
+      "Ukraine–Russia": ["Ukraine","Russia"], "Ukraine-Russia": ["Ukraine","Russia"],
+      "Armenia–Azerbaijan": ["Armenia","Azerbaijan"], "Armenia-Azerbaijan": ["Armenia","Azerbaijan"],
+      "Israel–Hamas": ["Israel","Gaza"], "Israel-Hamas": ["Israel","Gaza"],
+      "Israel–Hezbollah": ["Israel","Lebanon"], "Israel-Hezbollah": ["Israel","Lebanon"],
+      "Syria/Iraq (ISIS cells)": ["Syria","Iraq"],
+      "Sahel core (Mali–Burkina–Niger)": ["Mali","Burkina Faso","Niger"],
+      "Sahel core (Mali-Burkina-Niger)": ["Mali","Burkina Faso","Niger"],
+      "Benin/Togo (Sahel spillover)": ["Benin","Togo"],
+      "Venezuela–Colombia border (ELN/FARC-D presence)": ["Venezuela","Colombia"],
+      "Turkey–PKK (Turkey/N. Iraq/Syria)": ["Turkey","Iraq","Syria"]
+    };
+
+    // Small embedded sample so the page renders even without CSV
+    const EMBEDDED_SAMPLE = [
+      {"Conflict":"Ukraine–Russia","Country":"Ukraine","Lat":48.3794,"Lon":31.1656,"Sides":"Ukrainian state/volunteers; Russian regulars/proxies","Notes":"Sovereignty","Dominant":"Defense/Security","MotivesCount":7,"Defense/Security":1,"Justice/Redress":1,"Identity/Nationalism/Religion":1,"Governance/Autonomy":1,"Material/Status":0,"Coercion/Constraint":0,"Community/Networks":1,"External Narrative":1},
+      {"Conflict":"Ukraine–Russia","Country":"Russia","Lat":61.5240,"Lon":105.3188,"Sides":"Ukrainian state/volunteers; Russian regulars/proxies","Notes":"State narrative","Dominant":"Identity/Nationalism/Religion","MotivesCount":7,"Defense/Security":1,"Justice/Redress":1,"Identity/Nationalism/Religion":1,"Governance/Autonomy":0,"Material/Status":1,"Coercion/Constraint":1,"Community/Networks":0,"External Narrative":1},
+      {"Conflict":"Israel–Hamas (Gaza)","Country":"Israel","Lat":31.0461,"Lon":34.8516,"Sides":"IDF soldiers/reservists; Hamas/PIJ fighters","Notes":"National survival","Dominant":"Defense/Security","MotivesCount":6,"Defense/Security":1,"Justice/Redress":1,"Identity/Nationalism/Religion":1,"Governance/Autonomy":1,"Material/Status":0,"Coercion/Constraint":0,"Community/Networks":1,"External Narrative":0},
+      {"Conflict":"Israel–Hamas (Gaza)","Country":"Gaza","Lat":31.4,"Lon":34.3,"Sides":"IDF soldiers/reservists; Hamas/PIJ fighters","Notes":"End occupation","Dominant":"Identity/Nationalism/Religion","MotivesCount":7,"Defense/Security":1,"Justice/Redress":1,"Identity/Nationalism/Religion":1,"Governance/Autonomy":1,"Material/Status":1,"Coercion/Constraint":0,"Community/Networks":1,"External Narrative":1},
+      {"Conflict":"Sudan (SAF vs RSF)","Country":"Sudan","Lat":12.8628,"Lon":30.2176,"Sides":"SAF soldiers; RSF & allied militias","Notes":"Grievances/loot","Dominant":"Governance/Autonomy","MotivesCount":8,"Defense/Security":1,"Justice/Redress":1,"Identity/Nationalism/Religion":1,"Governance/Autonomy":1,"Material/Status":1,"Coercion/Constraint":1,"Community/Networks":1,"External Narrative":1}
+    ];
+
+    // --------- HELPERS ---------
+    function viridis(n, min, max) {
+      const t = (n - min) / Math.max(1, (max - min));
+      const stops = [[68,1,84],[59,82,139],[33,145,140],[94,201,98],[253,231,37]];
+      const idx = t * (stops.length - 1);
+      const i0 = Math.floor(idx), i1 = Math.min(stops.length-1, i0+1), frac = idx - i0;
+      const c = [0,1,2].map(k => Math.round(stops[i0][k]*(1-frac) + stops[i1][k]*frac));
+      return `rgb(${c[0]},${c[1]},${c[2]})`;
+    }
+
+    function countriesForConflict(name) {
+      for (const k in aliasMap) if (name.startsWith(k)) return aliasMap[k];
+      const base = name.split("(")[0];
+      const tokens = base.replace("–","-").replace("/","-").split("-").map(s=>s.trim());
+      const found = tokens.filter(t => centroids[t]);
+      return found.length ? found : [tokens[0]];
+    }
+
+    function presenceFromGroup(group) {
+      const pres = {};
+      motiveCols.forEach(m => pres[m] = group.some(r => +r[m] === 1) ? 1 : 0);
+      return pres;
+    }
+
+    function dominantFromGroup(group) {
+      const sums = {};
+      motiveCols.forEach(m => sums[m] = group.reduce((a,r)=>a+(+r[m]||0),0));
+      return motiveCols.slice().sort((a,b)=> (sums[b]-sums[a]) || (motiveCols.indexOf(a)-motiveCols.indexOf(b)) )[0];
+    }
+
+    // --------- DATA LOADING ---------
+    async function tryLoadCSV() {
+      try {
+        const res = await fetch(CSV_PATH, {cache: "no-store"});
+        if (!res.ok) throw new Error("no csv");
+        const text = await res.text();
+        // minimal CSV parser (no dependencies)
+        const [headerLine, ...lines] = text.split(/\r?\n/).filter(Boolean);
+        const headers = headerLine.split(",");
+        const out = [];
+        for (const line of lines) {
+          const cells = line.split(/,(?=(?:[^"]*"[^"]*")*[^"]*$)/); // split on commas not inside quotes
+          const row = {};
+          headers.forEach((h,i)=> row[h.replace(/^\uFEFF/,"")] = (cells[i]||"").replace(/^"|"$/g,""));
+          out.push(row);
+        }
+        return out;
+      } catch(e) {
+        return null;
+      }
+    }
+
+    function buildRecords(rows) {
+      // Expect original long-format table -> aggregate to conflict level & place markers per country
+      const byConflict = {};
+      rows.forEach(r => {
+        const name = r.Conflict;
+        if (!name) return;
+        byConflict[name] = byConflict[name] || [];
+        // coerce motive flags to numbers
+        motiveCols.forEach(m => r[m] = +r[m] || 0);
+        byConflict[name].push(r);
+      });
+
+      const recs = [];
+      for (const name in byConflict) {
+        const group = byConflict[name];
+        const sides = [...new Set(group.map(r=>r["Side/Identity"]).filter(Boolean))].sort().join("; ");
+        const notes = [...new Set(group.map(r=>r.Notes||"").filter(s=>s.trim()))].sort().join("; ");
+        const pres = presenceFromGroup(group);
+        const dom = dominantFromGroup(group);
+        const motivesCount = motiveCols.reduce((s,m)=> s + (pres[m]?1:0), 0);
+        const countries = countriesForConflict(name);
+        countries.forEach(c => {
+          if (!centroids[c]) return;
+          const [lat,lon] = centroids[c];
+          const rec = {Conflict:name, Country:c, Lat:lat, Lon:lon, Sides:sides, Notes:notes, Dominant:dom, MotivesCount:motivesCount};
+          motiveCols.forEach(m => rec[m] = pres[m]);
+          recs.push(rec);
+        });
+      }
+      return recs;
+    }
+
+    // --------- MAP RENDER ---------
+    const map = L.map('map').setView([20, 10], 2);
+    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png',
+      {maxZoom: 7, attribution: '&copy; OpenStreetMap'}).addTo(map);
+
+    const layerCat = L.layerGroup().addTo(map);
+    const layerGrad = L.layerGroup(); // start hidden
+
+    function popupHtml(d) {
+      const motives = motiveCols.filter(m => +d[m] === 1).join(", ");
+      return `
+        <b>${d.Conflict}</b><br><i>${d.Country}</i><br>
+        <b>Dominant:</b> ${d.Dominant}<br>
+        <b>Motives present:</b> ${d.MotivesCount}<br>
+        <b>Categories:</b> ${motives}<br>
+        <b>Sides:</b> ${d.Sides || ""}${d.Notes ? `<br><b>Notes:</b> ${d.Notes}` : ""}
+      `;
+    }
+
+    function render(records) {
+      layerCat.clearLayers();
+      layerGrad.clearLayers();
+
+      const minC = Math.min(...records.map(r=>+r.MotivesCount));
+      const maxC = Math.max(...records.map(r=>+r.MotivesCount));
+
+      records.forEach(d => {
+        const c1 = colorMap[d.Dominant] || "#7f7f7f";
+        L.circleMarker([d.Lat, d.Lon], {radius: 9, color:c1, fillColor:c1, fillOpacity:0.9, weight:1})
+         .bindPopup(popupHtml(d)).addTo(layerCat);
+
+        const c2 = viridis(+d.MotivesCount, minC, maxC);
+        L.circleMarker([d.Lat, d.Lon], {radius: 6 + (+d.MotivesCount)*1.5, color:c2, fillColor:c2, fillOpacity:0.9, weight:1})
+         .bindPopup(popupHtml(d)).addTo(layerGrad);
+      });
+
+      updateLegend('cat');
+    }
+
+    function updateLegend(mode) {
+      const el = document.getElementById('legend');
+      if (mode === 'cat') {
+        el.innerHTML = '<b>Dominant motive</b><br>' +
+          Object.entries(colorMap).map(([k,v])=>`<span class="swatch" style="background:${v}"></span>${k}`).join('<br>');
+      } else {
+        el.innerHTML = '<b>Number of motives present</b><div class="bar"></div><div>Low &larr; ➜ &rarr; High</div>';
+      }
+    }
+
+    function showCat() {
+      map.removeLayer(layerGrad);
+      layerCat.addTo(map);
+      updateLegend('cat');
+    }
+    function showGrad() {
+      map.removeLayer(layerCat);
+      layerGrad.addTo(map);
+      updateLegend('grad');
+    }
+
+    document.getElementById('btnCat').addEventListener('click', showCat);
+    document.getElementById('btnGrad').addEventListener('click', showGrad);
+
+    (async function init() {
+      let rows = await tryLoadCSV();
+      if (!rows) {
+        // fallback to embedded sample (already conflict-level)
+        render(EMBEDDED_SAMPLE);
+        return;
+      }
+      const records = buildRecords(rows);
+      render(records);
+    })();
+  </script>
+</body>
+</html>
