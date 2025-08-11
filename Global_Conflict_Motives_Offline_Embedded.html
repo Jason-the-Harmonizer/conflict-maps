@@ -1,0 +1,173 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8"/>
+<title>Global Conflict Motives — Offline Map</title>
+<meta name="viewport" content="width=device-width, initial-scale=1"/>
+<style>
+  html, body { margin:0; height:100%; background:#fff; font-family:-apple-system, BlinkMacSystemFont, Segoe UI, Roboto, Helvetica, Arial, sans-serif; }
+  #toolbar { position:fixed; top:10px; left:10px; z-index:9999; background:#fff; padding:10px; border-radius:8px; box-shadow:0 1px 4px rgba(0,0,0,.2); }
+  #mapWrap { width:100%; height:100%; }
+  #legend { position:fixed; right:10px; bottom:10px; z-index:9999; background:#fff; padding:10px; border-radius:8px; box-shadow:0 1px 4px rgba(0,0,0,.2); }
+  .swatch { display:inline-block; width:12px; height:12px; border-radius:2px; margin-right:6px; vertical-align:-1px; }
+  .bar { width:200px; height:10px; background: linear-gradient(90deg, #440154, #3b528b, #21918c, #5ec962, #fde725); border-radius:4px; margin-top:6px; }
+  .dot { cursor:pointer; }
+  .tooltip { position:fixed; pointer-events:none; background:#111; color:#fff; padding:8px 10px; border-radius:6px; font-size:12px; opacity:0; transform:translate(-50%, -120%); }
+  button { margin-right:6px; }
+</style>
+</head>
+<body>
+<div id="toolbar">
+  <b>View:</b>
+  <button id="btnCat">Categorical</button>
+  <button id="btnGrad">Gradient</button>
+</div>
+<div id="mapWrap"></div>
+<div id="legend"></div>
+<div id="tooltip" class="tooltip"></div>
+<script>
+  const DATA = [{"Conflict": "Ukraine–Russia", "Country": "Ukraine", "Lat": 48.3794, "Lon": 31.1656, "Sides": "Ukrainian state/volunteers; Russian regulars/proxies", "Notes": "Sovereignty", "Dominant": "Defense/Security", "MotivesCount": 7, "Defense/Security": 1, "Justice/Redress": 1, "Identity/Nationalism/Religion": 1, "Governance/Autonomy": 1, "Material/Status": 0, "Coercion/Constraint": 0, "Community/Networks": 1, "External Narrative": 1}, {"Conflict": "Ukraine–Russia", "Country": "Russia", "Lat": 61.524, "Lon": 105.3188, "Sides": "Ukrainian state/volunteers; Russian regulars/proxies", "Notes": "State narrative", "Dominant": "Identity/Nationalism/Religion", "MotivesCount": 7, "Defense/Security": 1, "Justice/Redress": 1, "Identity/Nationalism/Religion": 1, "Governance/Autonomy": 0, "Material/Status": 1, "Coercion/Constraint": 1, "Community/Networks": 0, "External Narrative": 1}, {"Conflict": "Israel–Hamas (Gaza)", "Country": "Israel", "Lat": 31.0461, "Lon": 34.8516, "Sides": "IDF soldiers/reservists; Hamas/PIJ fighters", "Notes": "National survival", "Dominant": "Defense/Security", "MotivesCount": 6, "Defense/Security": 1, "Justice/Redress": 1, "Identity/Nationalism/Religion": 1, "Governance/Autonomy": 1, "Material/Status": 0, "Coercion/Constraint": 0, "Community/Networks": 1, "External Narrative": 0}, {"Conflict": "Israel–Hamas (Gaza)", "Country": "Gaza", "Lat": 31.4, "Lon": 34.3, "Sides": "IDF soldiers/reservists; Hamas/PIJ fighters", "Notes": "End occupation", "Dominant": "Identity/Nationalism/Religion", "MotivesCount": 7, "Defense/Security": 1, "Justice/Redress": 1, "Identity/Nationalism/Religion": 1, "Governance/Autonomy": 1, "Material/Status": 1, "Coercion/Constraint": 0, "Community/Networks": 1, "External Narrative": 1}, {"Conflict": "Sudan (SAF vs RSF)", "Country": "Sudan", "Lat": 12.8628, "Lon": 30.2176, "Sides": "SAF soldiers; RSF & allied militias", "Notes": "Grievances/loot", "Dominant": "Governance/Autonomy", "MotivesCount": 8, "Defense/Security": 1, "Justice/Redress": 1, "Identity/Nationalism/Religion": 1, "Governance/Autonomy": 1, "Material/Status": 1, "Coercion/Constraint": 1, "Community/Networks": 1, "External Narrative": 1}];
+  const colorMap = {
+    "Defense/Security": "#1f77b4",
+    "Justice/Redress": "#d62728",
+    "Identity/Nationalism/Religion": "#9467bd",
+    "Governance/Autonomy": "#2ca02c",
+    "Material/Status": "#8c564b",
+    "Coercion/Constraint": "#e377c2",
+    "Community/Networks": "#17becf",
+    "External Narrative": "#ff7f0e"
+  };
+  const motiveCols = ["Defense/Security","Justice/Redress","Identity/Nationalism/Religion","Governance/Autonomy","Material/Status","Coercion/Constraint","Community/Networks","External Narrative"];
+
+  function viridis(n, min, max) {
+    const t = (n - min) / Math.max(1, (max - min));
+    const stops = [[68,1,84],[59,82,139],[33,145,140],[94,201,98],[253,231,37]];
+    const idx = t * (stops.length - 1);
+    const i0 = Math.floor(idx), i1 = Math.min(stops.length-1, i0+1), frac = idx - i0;
+    const c = [0,1,2].map(k => Math.round(stops[i0][k]*(1-frac) + stops[i1][k]*frac));
+    return `rgb($R,$u,$s)`;
+  }
+
+  function project(lon, lat, width, height) {
+    const x = (lon + 180) * (width / 360);
+    const y = (90 - lat) * (height / 180);
+    return [x, y];
+  }
+
+  function draw() {
+    const wrap = document.getElementById('mapWrap');
+    wrap.innerHTML = "";
+    const w = wrap.clientWidth || window.innerWidth;
+    const h = wrap.clientHeight || window.innerHeight;
+
+    const svg = document.createElementNS("http://www.w3.org/2000/svg","svg");
+    svg.setAttribute("width", w);
+    svg.setAttribute("height", h);
+    svg.setAttribute("viewBox", `0 0 ${w} ${h}`);
+    svg.style.background = "#eef3f7";
+    wrap.appendChild(svg);
+
+    const grid = document.createElementNS(svg.namespaceURI, "g");
+    grid.setAttribute("stroke", "#cbd5e1");
+    grid.setAttribute("stroke-width", "0.5");
+    grid.setAttribute("fill","none");
+    svg.appendChild(grid);
+    for (let lon = -180; lon <= 180; lon += 30) {
+      const [x1,y1] = project(lon, -85, w, h);
+      const [x2,y2] = project(lon,  85, w, h);
+      const line = document.createElementNS(svg.namespaceURI, "line");
+      line.setAttribute("x1", x1); line.setAttribute("y1", y1);
+      line.setAttribute("x2", x2); line.setAttribute("y2", y2);
+      grid.appendChild(line);
+    }
+    for (let lat = -60; lat <= 80; lat += 20) {
+      const [x1,y1] = project(-180, lat, w, h);
+      const [x2,y2] = project( 180, lat, w, h);
+      const line = document.createElementNS(svg.namespaceURI, "line");
+      line.setAttribute("x1", x1); line.setAttribute("y1", y1);
+      line.setAttribute("x2", x2); line.setAttribute("y2", y2);
+      grid.appendChild(line);
+    }
+
+    const minC = Math.min(...DATA.map(d => Number(d.MotivesCount)||0));
+    const maxC = Math.max(...DATA.map(d => Number(d.MotivesCount)||0));
+
+    const layerCat = document.createElementNS(svg.namespaceURI, "g");
+    const layerGrad = document.createElementNS(svg.namespaceURI, "g");
+    svg.appendChild(layerCat);
+    svg.appendChild(layerGrad);
+
+    const tooltip = document.getElementById('tooltip');
+    function showTip(evt, html) {
+      tooltip.innerHTML = html;
+      tooltip.style.left = (evt.clientX) + "px";
+      tooltip.style.top  = (evt.clientY - 10) + "px";
+      tooltip.style.opacity = 0.95;
+    }
+    function hideTip() { tooltip.style.opacity = 0; }
+
+    DATA.forEach(d => {
+      const lon = Number(d.Lon), lat = Number(d.Lat);
+      if (isNaN(lon) || isNaN(lat)) return;
+      const [x,y] = project(lon, lat, w, h);
+      const motives = motiveCols.filter(m => Number(d[m])===1).join(", ");
+      const html = `<b>${d.Conflict||""}</b><br><i>${d.Country||""}</i><br>` +
+                   `<b>Dominant:</b> ${d.Dominant||""}<br>` +
+                   `<b>Motives present:</b> ${d.MotivesCount||0}<br>` +
+                   `<b>Categories:</b> ${motives}<br>` +
+                   `<b>Sides:</b> ${d.Sides||""}` +
+                   (d.Notes ? `<br><b>Notes:</b> ${d.Notes}` : "");
+
+      // categorical dot
+      const colorCat = (colorMap[d.Dominant] || "#7f7f7f");
+      const dot1 = document.createElementNS(svg.namespaceURI, "circle");
+      dot1.setAttribute("cx", x); dot1.setAttribute("cy", y);
+      dot1.setAttribute("r", 7); dot1.setAttribute("fill", colorCat);
+      dot1.setAttribute("stroke", "#111"); dot1.setAttribute("stroke-width", "0.5");
+      dot1.classList.add("dot");
+      dot1.addEventListener("mousemove", e => showTip(e, html));
+      dot1.addEventListener("mouseleave", hideTip);
+      layerCat.appendChild(dot1);
+
+      // gradient dot
+      const colorGrad = viridis(Number(d.MotivesCount)||0, minC, maxC);
+      const size = 6 + (Number(d.MotivesCount)||0) * 1.5;
+      const dot2 = document.createElementNS(svg.namespaceURI, "circle");
+      dot2.setAttribute("cx", x); dot2.setAttribute("cy", y);
+      dot2.setAttribute("r", size); dot2.setAttribute("fill", colorGrad);
+      dot2.setAttribute("stroke", "#111"); dot2.setAttribute("stroke-width", "0.5");
+      dot2.classList.add("dot");
+      dot2.addEventListener("mousemove", e => showTip(e, html));
+      dot2.addEventListener("mouseleave", hideTip);
+      layerGrad.appendChild(dot2);
+    });
+
+    function updateLegend(mode) {
+      const el = document.getElementById('legend');
+      if (mode === 'cat') {
+        el.innerHTML = '<b>Dominant motive</b><br>' + Object.entries(colorMap)
+          .map(([k,v]) => `<span class="swatch" style="background:${v}"></span>${k}`).join('<br>');
+      } else {
+        el.innerHTML = '<b>Number of motives present</b><div class="bar"></div><div>Low &larr; ➜ &rarr; High</div>';
+      }
+    }
+
+    // Toggle visibility
+    function showCat() { layerGrad.setAttribute("display","none"); layerCat.setAttribute("display","block"); updateLegend('cat'); }
+    function showGrad() { layerCat.setAttribute("display","none"); layerGrad.setAttribute("display","block"); updateLegend('grad'); }
+
+    // Wire buttons
+    document.getElementById('btnCat').onclick = showCat;
+    document.getElementById('btnGrad').onclick = showGrad;
+
+    // Default
+    showCat();
+
+    // Redraw on rotate/resize (basic)
+    window.onresize = draw;
+  }
+
+  draw();
+</script>
+</body>
+</html>
